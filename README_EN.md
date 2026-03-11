@@ -27,7 +27,9 @@
 
 An open-source book explaining the design principles and implementation experience of modern machine learning systems, covering the complete technology stack from programming interfaces and computational graphs to compilers and distributed training.
 
-**Read Online:** [openmlsys.github.io](https://openmlsys.github.io/)
+**English version 1 (stable):** [openmlsys.github.io/html-en/](https://openmlsys.github.io/html-en/)
+
+**English version 2:** Under reconstruction.
 
 ## Table of Contents
 
@@ -76,6 +78,15 @@ The book is organized into three parts: Fundamentals, Advanced Topics, and Exten
 | [Explainable AI Systems](chapter_explainable_AI/) | XAI methods and production practices |
 | [Robot Learning Systems](chapter_rl_sys/) | Robot perception, planning, control, and system safety |
 
+## Changelog
+
+| Date | Event |
+|------|-------|
+| 2022-01 | Project initialized; Chinese content writing begins |
+| 2022-05 | Extension chapters released (Federated Learning, RL Systems, Explainable AI) |
+| 2023-05 | Codebase adapted to MindSpore 2.0 |
+| 2026-03 | Bilingual (CN/EN) build architecture refactored; English version launched |
+
 ## Build Guide
 
 ### Prerequisites
@@ -122,6 +133,26 @@ Before contributing, please read:
 ## Community
 
 Join our WeChat group by scanning the QR code in [info/mlsys_group.png](info/mlsys_group.png).
+
+## Citation
+
+If this book has been helpful to your research or work, please cite it as:
+
+**Plain text:**
+
+> OpenMLSys Team. *Machine Learning Systems: Design and Implementation*. 2022. https://openmlsys.github.io/
+
+**BibTeX:**
+
+```bibtex
+@book{openmlsys2022,
+  title     = {Machine Learning Systems: Design and Implementation},
+  author    = {OpenMLSys Team},
+  year      = {2022},
+  url       = {https://openmlsys.github.io/},
+  note      = {Open-source textbook, \url{https://github.com/openmlsys/openmlsys-zh}}
+}
+```
 
 ## License
 

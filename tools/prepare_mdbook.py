@@ -4,13 +4,16 @@ import argparse
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 TOC_FENCE = "toc"
 EVAL_RST_FENCE = "eval_rst"
-OPTION_LINE_RE = re.compile(r"^:(width|label):`[^`]+`\s*$", re.MULTILINE)
+WIDTH_LINE_RE = re.compile(r"^:width:`[^`]+`\s*$", re.MULTILINE)
+LABEL_RE = re.compile(r":label:`([^`]+)`")
 NUMREF_RE = re.compile(r":numref:`([^`]+)`")
+IMAGE_LINE_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$")
+LABEL_LINE_RE = re.compile(r"^:label:`([^`]+)`\s*$")
 EQREF_RE = re.compile(r":eqref:`([^`]+)`")
 EQLABEL_LINE_RE = re.compile(r"^:eqlabel:`([^`]+)`\s*$")
 CITE_RE = re.compile(r":cite:`([^`]+)`")
@@ -343,12 +346,110 @@ def process_equation_labels(markdown: str) -> tuple[str, dict[str, int]]:
     return "\n".join(result), label_map
 
 
+def collect_labels(markdown: str) -> list[str]:
+    """Extract all label names from :label: directives."""
+    return LABEL_RE.findall(markdown)
+
+
+def collect_figure_labels(markdown: str) -> list[str]:
+    """Return label names for figures (image lines followed by :label:)."""
+    labels: list[str] = []
+    lines = markdown.splitlines()
+    for i, line in enumerate(lines):
+        if not IMAGE_LINE_RE.match(line.strip()):
+            continue
+        j = i + 1
+        while j < len(lines):
+            s = lines[j].strip()
+            if not s or WIDTH_LINE_RE.match(s):
+                j += 1
+                continue
+            m = LABEL_LINE_RE.match(s)
+            if m:
+                labels.append(m.group(1))
+            break
+    return labels
+
+
+def process_figure_captions(
+    markdown: str,
+    fig_number_map: dict[str, str] | None = None,
+) -> str:
+    """Convert image+label blocks into figures with anchors and captions."""
+    lines = markdown.splitlines()
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        img_match = IMAGE_LINE_RE.match(lines[i].strip())
+        if img_match:
+            caption = img_match.group(1)
+            img_line = lines[i]
+            # Look ahead for :width: and :label:
+            j = i + 1
+            label = None
+            while j < len(lines):
+                s = lines[j].strip()
+                if not s or WIDTH_LINE_RE.match(s):
+                    j += 1
+                    continue
+                m = LABEL_LINE_RE.match(s)
+                if m:
+                    label = m.group(1)
+                    j += 1
+                break
+
+            if label:
+                fig_num = (fig_number_map or {}).get(label)
+                result.append(f'<a id="{label}"></a>')
+                result.append("")
+                result.append(img_line)
+                if fig_num and caption:
+                    result.append("")
+                    result.append(f'<p align="center">图{fig_num} {caption}</p>')
+                elif fig_num:
+                    result.append("")
+                    result.append(f'<p align="center">图{fig_num}</p>')
+                elif caption:
+                    result.append("")
+                    result.append(f'<p align="center">{caption}</p>')
+                i = j
+                continue
+
+        result.append(lines[i])
+        i += 1
+    return "\n".join(result)
+
+
+def _relative_chapter_path(from_path: str, to_path: str) -> str:
+    """Compute relative path between two mdbook source_paths."""
+    if from_path == to_path:
+        return ""
+    from_dir = str(PurePosixPath(from_path).parent)
+    return PurePosixPath(os.path.relpath(to_path, start=from_dir)).as_posix()
+
+
 def normalize_directives(
     markdown: str,
     label_map: dict[str, int] | None = None,
+    ref_label_map: dict[str, str] | None = None,
+    current_source_path: str | None = None,
+    fig_number_map: dict[str, str] | None = None,
 ) -> str:
-    normalized = OPTION_LINE_RE.sub("", markdown)
-    normalized = NUMREF_RE.sub(lambda match: f"`{match.group(1)}`", normalized)
+    normalized = WIDTH_LINE_RE.sub("", markdown)
+    normalized = LABEL_RE.sub(lambda m: f'<a id="{m.group(1)}"></a>', normalized)
+
+    def _numref_replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if ref_label_map and current_source_path and name in ref_label_map:
+            target_path = ref_label_map[name]
+            rel = _relative_chapter_path(current_source_path, target_path)
+            display = f"图{fig_number_map[name]}" if fig_number_map and name in fig_number_map else name
+            if rel:
+                return f"[{display}]({rel}#{name})"
+            return f"[{display}](#{name})"
+        return f"`{name}`"
+
+    normalized = NUMREF_RE.sub(_numref_replace, normalized)
     if label_map:
         normalized = EQREF_RE.sub(
             lambda m: f"({label_map[m.group(1)]})" if m.group(1) in label_map else f"$\\eqref{{{m.group(1)}}}$",
@@ -509,6 +610,121 @@ def process_citations(
     return processed
 
 
+_FENCE_RE = re.compile(r"^(`{3,}|~{3,})", re.MULTILINE)
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
+
+
+def _iter_math_spans(content: str):
+    """Yield ``(start, end, is_display)`` for every math span.
+
+    Skips spans inside fenced code blocks and inline code.
+    """
+    n = len(content)
+    i = 0
+    in_fence: str | None = None  # fence marker when inside a code block
+
+    while i < n:
+        # Track fenced code blocks
+        if content[i] == "`" or content[i] == "~":
+            m = _FENCE_RE.match(content, i)
+            if m and (i == 0 or content[i - 1] == "\n"):
+                marker = m.group(1)
+                if in_fence is None:
+                    in_fence = marker[0]  # opening
+                    i = content.index("\n", i) + 1 if "\n" in content[i:] else n
+                    continue
+                elif marker[0] == in_fence:
+                    in_fence = None       # closing
+                    i = m.end()
+                    continue
+
+        if in_fence:
+            i += 1
+            continue
+
+        # Skip inline code
+        if content[i] == "`":
+            end_tick = content.find("`", i + 1)
+            if end_tick != -1:
+                i = end_tick + 1
+                continue
+
+        # Display math $$...$$
+        if content[i:i + 2] == "$$":
+            start = i
+            close = content.find("$$", i + 2)
+            if close != -1:
+                yield (start + 2, close, True)
+                i = close + 2
+                continue
+
+        # Inline math $...$
+        if content[i] == "$":
+            start = i
+            j = i + 1
+            while j < n:
+                if content[j] == "$":
+                    if j > i + 1:  # non-empty
+                        yield (start + 1, j, False)
+                    j += 1
+                    break
+                if content[j] == "\n" and not content[i + 1:j].strip():
+                    break  # empty line → not math
+                j += 1
+            i = j
+            continue
+
+        i += 1
+
+
+def convert_math_to_mathjax(content: str) -> str:
+    """Replace ``$``/``$$`` delimited math with MathJax ``\\(…\\)``/``\\[…\\]``.
+
+    Inside math content, ``\\`` (LaTeX newline) is doubled to ``\\\\`` so that
+    mdBook's markdown processing (which consumes one level of backslash
+    escaping) delivers the correct ``\\`` to MathJax.
+    """
+    spans = list(_iter_math_spans(content))
+    if not spans:
+        return content
+
+    parts: list[str] = []
+    prev = 0
+    for start, end, is_display in spans:
+        delim = "$$" if is_display else "$"
+        delim_len = len(delim)
+        delim_start = start - delim_len
+
+        math = content[start:end]
+
+        # Spans containing CJK characters are almost certainly mismatched $.
+        # Strip the $ delimiters and emit the raw text.
+        if _CJK_RE.search(math):
+            parts.append(content[prev:delim_start])
+            parts.append(math)
+            prev = end + delim_len
+            continue
+
+        parts.append(content[prev:delim_start])
+
+        # Double backslashes inside math so that after mdBook markdown
+        # processing (which eats one backslash layer) MathJax sees the
+        # original LaTeX.
+        math = math.replace("\\\\", "\\\\\\\\")
+        math = math.replace("*", "\\*")
+        math = math.replace("_", "\\_")
+
+        if is_display:
+            parts.append(f"\\\\[{math}\\\\]")
+        else:
+            parts.append(f"\\\\({math}\\\\)")
+
+        prev = end + delim_len
+
+    parts.append(content[prev:])
+    return "".join(parts)
+
+
 def resolve_raw_html_file(current_file: Path, filename: str) -> Path:
     direct = (current_file.parent / filename).resolve()
     if direct.exists():
@@ -628,6 +844,9 @@ def rewrite_markdown(
     bibliography_title: str = DEFAULT_BIBLIOGRAPHY_TITLE,
     frontpage_switch_label: str | None = None,
     frontpage_switch_href: str | None = None,
+    ref_label_map: dict[str, str] | None = None,
+    current_source_path: str | None = None,
+    fig_number_map: dict[str, str] | None = None,
 ) -> str:
     output: list[str] = []
     lines = markdown.splitlines()
@@ -676,7 +895,14 @@ def rewrite_markdown(
 
     raw = "\n".join(output) + "\n"
     result, label_map = process_equation_labels(raw)
-    result = normalize_directives(result, label_map=label_map)
+    result = process_figure_captions(result, fig_number_map=fig_number_map)
+    result = normalize_directives(
+        result,
+        label_map=label_map,
+        ref_label_map=ref_label_map,
+        current_source_path=current_source_path,
+        fig_number_map=fig_number_map,
+    )
     result = process_citations(result, bib_db or {}, bibliography_title=bibliography_title)
     return result
 

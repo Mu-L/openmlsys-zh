@@ -200,11 +200,11 @@ def parse_toc_blocks(markdown: str) -> list[list[TocItem]]:
     return blocks
 
 
-def resolve_toc_target(current_file: Path, entry: str) -> Path:
+def resolve_toc_target(current_file: Path, entry: str) -> Path | None:
     target_name = entry if entry.endswith(".md") else f"{entry}.md"
     target = (current_file.parent / target_name).resolve()
     if not target.exists():
-        raise FileNotFoundError(f"TOC entry '{entry}' from '{current_file}' does not exist")
+        return None
     return target
 
 
@@ -828,7 +828,7 @@ def render_toc_list(entries: list[TocItem], current_file: Path, title_cache: dic
             continue
 
         target = resolve_toc_target(current_file, entry.target)
-        if target not in title_cache:
+        if target is None or target not in title_cache:
             continue
 
         label = chapter_label(entry, target, title_cache)
@@ -943,7 +943,9 @@ def build_summary(source_dir: Path, title_cache: dict[Path, str]) -> str:
             for entry in block:
                 if entry.kind != "chapter" or entry.target is None:
                     continue
-                append_entry(resolve_toc_target(target, entry.target), indent + 1, entry.label or None)
+                child_target = resolve_toc_target(target, entry.target)
+                if child_target is not None:
+                    append_entry(child_target, indent + 1, entry.label or None)
 
     def append_prefix_chapter(target: Path, label: str | None = None) -> None:
         target = target.resolve()
@@ -969,6 +971,8 @@ def build_summary(source_dir: Path, title_cache: dict[Path, str]) -> str:
                 continue
 
             target = resolve_toc_target(root_index, entry.target)
+            if target is None:
+                continue
             if numbered_started:
                 append_entry(target, 0, entry.label or None)
             else:

@@ -144,8 +144,10 @@ missing
             )
             (source / "existing.md").write_text("# 现有章节\n", encoding="utf-8")
 
-            with self.assertRaises(FileNotFoundError):
-                write_summary(source)
+            summary_path = write_summary(source)
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertIn("existing", summary)
+            self.assertNotIn("missing", summary)
 
     def test_rewrite_markdown_normalizes_common_d2l_directives(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

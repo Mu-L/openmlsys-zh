@@ -136,6 +136,10 @@ def is_placeholder_markdown(markdown: str, placeholder_prefix: str | None = None
     return stripped.startswith(placeholder_prefix) and stripped.endswith("]")
 
 
+def _strip_pandoc_heading_id(heading: str) -> str:
+    return re.sub(r"\s+\{#[^}]+\}\s*$", "", heading)
+
+
 def extract_title(markdown: str, fallback: str = "Untitled") -> str:
     lines = markdown.splitlines()
 
@@ -146,13 +150,13 @@ def extract_title(markdown: str, fallback: str = "Untitled") -> str:
         if stripped.startswith("#"):
             heading = stripped.lstrip("#").strip()
             if heading:
-                return heading
+                return _strip_pandoc_heading_id(heading)
 
         next_index = index + 1
         if next_index < len(lines):
             underline = lines[next_index].strip()
             if underline and set(underline) <= {"=", "-"}:
-                return stripped
+                return _strip_pandoc_heading_id(stripped)
 
     return fallback
 
@@ -904,6 +908,7 @@ def rewrite_markdown(
         fig_number_map=fig_number_map,
     )
     result = process_citations(result, bib_db or {}, bibliography_title=bibliography_title)
+    result = re.sub(r"^(#{1,6}\s+.*?)\s+\{#[^}]+\}\s*$", r"\1", result, flags=re.MULTILINE)
     return result
 
 

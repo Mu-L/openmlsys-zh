@@ -10,7 +10,7 @@
 [AI Compiler Backend](chapter_backend_and_runtime/index.md)
 [Hardware Accelerator](chapter_accelerator/index.md)
 [Data Processing Framework](chapter_data_processing/index.md)
-[Model Deployment {#ch:deploy}](chapter_model_deployment/index.md)
+[Model Deployment](chapter_model_deployment/index.md)
 [Distributed Training](chapter_distributed_training/index.md)
 [Part II Application Scenarios](chapter_preface_extension/index.md)
 [Recommender System](chapter_recommender_system/index.md)
